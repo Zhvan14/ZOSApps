@@ -4,8 +4,7 @@ from PIL import Image
 from pyzbar.pyzbar import decode
 
 # The full path to the image file containing the QR code.
-qrname = input("QR Name: ")
-image_path = input("")
+image_path = input("QR Code Path: ")
 
 def decode_qr_code_from_file(file_path):
     """
