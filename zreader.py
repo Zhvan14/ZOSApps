@@ -5,7 +5,7 @@ from pyzbar.pyzbar import decode
 
 # The full path to the image file containing the QR code.
 qrname = input("QR Name: ")
-image_path = input("QR Path: ")
+image_path = input("")
 
 def decode_qr_code_from_file(file_path):
     """
@@ -27,7 +27,6 @@ def decode_qr_code_from_file(file_path):
                 print(f"Data: {data}")
                 print(f"Type: {obj.type}")
                 print("---")
-            play_sound()  # Play sound if QR code is found
         else:
             print("No QR code was found in the image. Make sure the image is clear and the QR code is not damaged.")
 
