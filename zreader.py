@@ -5,27 +5,7 @@ from pyzbar.pyzbar import decode
 
 # The full path to the image file containing the QR code.
 qrname = input("QR Name: ")
-image_path = f"/storage/emulated/0/ZBucks/QR Codes/{qrname}"
-
-# The path to your sound file
-# Make sure you have a sound file in this location
-# For example, you can place a file named 'beep.mp3' in your ZBucks folder
-sound_path = f"/storage/emulated/0/ZBucks/Automated Programs/Extra/beep.mp3"
-
-def play_sound():
-    """
-    Plays a sound file using the mpv command.
-    """
-    try:
-        if os.path.exists(sound_path):
-            # The command to play the sound file
-            subprocess.run(["mpv", sound_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            print("Sound file not found.")
-    except FileNotFoundError:
-        print("Error: 'mpv' command not found. Is mpv installed?")
-    except subprocess.CalledProcessError as e:
-        print(f"Error playing sound: {e}")
+image_path = input("")
 
 def decode_qr_code_from_file(file_path):
     """
@@ -56,3 +36,4 @@ def decode_qr_code_from_file(file_path):
 
 # Call the function with the path to your image
 decode_qr_code_from_file(image_path)
+input()
