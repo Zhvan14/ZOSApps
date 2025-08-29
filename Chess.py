@@ -19,6 +19,8 @@ while not board.is_game_over():
         # Make the move
         if move in board.legal_moves:
             board.push(move)
+        elif move_san == "exit":
+            break
         else:
             print("Illegal move. Try again.")
 
