@@ -24,6 +24,7 @@ while not board.is_game_over() and not game_ended:
             if response == "accept":
                 print("\nGame is a draw.")
                 game_ended = True  # Set the flag to end the loop
+                input()
             else:
                 continue
 
@@ -32,6 +33,7 @@ while not board.is_game_over() and not game_ended:
             winner = "Black" if board.turn else "White"
             print(f"{resigner} resigns. {winner} wins.")
             game_ended = True  # Set the flag to end the loop
+            input()
 
         elif move_san == "exit":
             print("Exiting game...")
@@ -45,7 +47,7 @@ while not board.is_game_over() and not game_ended:
                 print("Illegal move. Try again.")
 
     except (ValueError, chess.InvalidMoveError):
-        print("Invalid format. Please use SAN (e.g., 'Nf3', 'e4'), 'draw', 'resign', or 'exit'.")
+        print()
         
 # A separate check for game outcome after the loop
 if not game_ended:
