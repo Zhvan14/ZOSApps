@@ -13,8 +13,7 @@ from kivy.uix.popup import Popup
 TCP_PORT = 5001
 UDP_PORT = 5000
 BROADCAST_MSG = b'CHESS_HOST'
-BROADCAST_INTERVAL = 1  # seconds
-BUFFER = 1024
+BROADCAST_INTERVAL = 1
 
 # ---------- NETWORK THREAD ----------
 class NetworkThread(threading.Thread):
@@ -40,7 +39,7 @@ class NetworkThread(threading.Thread):
                 self.app.update_status("Connected! Waiting for opponent's move.")
 
             while True:
-                data = self.conn.recv(BUFFER)
+                data = self.conn.recv(1024)
                 if not data:
                     break
                 text = data.decode()
@@ -53,20 +52,23 @@ class NetworkThread(threading.Thread):
                         self.app.is_my_turn = True
                         self.app.update_status(f"{'White' if self.app.board.turn else 'Black'} to move")
                     elif msg_type == "DRAW":
-                        self.app.show_draw_offer_from_network()
+                        self.app.offer_draw_network()
                     elif msg_type == "DRAW_ACCEPT":
-                        self.app.show_popup("Draw accepted! Game ends.", self.app.reset_game)
+                        self.app.show_popup("Draw accepted. Game ends.", self.app.reset_game)
                     elif msg_type == "RESIGN":
                         winner = 'Black' if self.app.board.turn else 'White'
                         self.app.show_popup(f"{winner} wins by resignation!", self.app.reset_game)
-
         except Exception as e:
             print("Network error:", e)
             self.app.update_status("Connection lost!")
 
-    def send_message(self, msg_type, data=''):
+    def send_move(self, move):
         if self.conn:
-            self.conn.sendall(f"{msg_type}:{data}".encode())
+            self.conn.sendall(f"MOVE:{move.uci()}".encode())
+
+    def send_message(self, msg):
+        if self.conn:
+            self.conn.sendall(msg.encode())
 
 # ---------- LAN DISCOVERY ----------
 def broadcast_host(stop_event):
@@ -112,14 +114,14 @@ class ChessApp(App):
 
         # Controls
         controls = BoxLayout(size_hint=(1, 0.2), spacing=5)
-        self.status_label = Label(text='Choose Mode')
+        self.status_label = Label(text='Choose Host, Join or Local')
         controls.add_widget(self.status_label)
 
         resign_btn = Button(text='Resign', on_press=self.resign)
         draw_btn = Button(text='Draw', on_press=self.offer_draw)
         host_btn = Button(text='Host', on_press=self.host_game)
         join_btn = Button(text='Join', on_press=self.join_game)
-        local_btn = Button(text='Local', on_press=self.start_local_game)
+        local_btn = Button(text='Local', on_press=self.start_local)
 
         controls.add_widget(resign_btn)
         controls.add_widget(draw_btn)
@@ -138,104 +140,134 @@ class ChessApp(App):
                 square = chess.square(file, rank)
                 piece = self.board.piece_at(square)
                 text = piece.symbol() if piece else ''
-                btn = Button(text=text, font_size=24, on_press=lambda btn, s=square: self.select_square(s))
+                btn = Button(text=text, font_size=24,
+                             on_press=lambda btn, s=square: self.select_square(s))
                 self.square_buttons[square] = btn
                 self.grid.add_widget(btn)
 
     def select_square(self, square):
-        # Only enforce turn for network games
         if self.network and not self.is_my_turn:
             self.update_status("Wait for your turn!")
             return
 
+        piece = self.board.piece_at(square)
         if self.selected_square is None:
-            if self.board.piece_at(square) is None or self.board.piece_at(square).color != self.board.turn:
-                self.update_status('Select a valid piece.')
+            if piece is None or piece.color != self.board.turn:
+                self.update_status('Select a valid piece to move.')
                 return
             self.selected_square = square
-            self.square_buttons[square].background_color = (0, 1, 0, 1)
+            self.square_buttons[square].background_color = (0,1,0,1)
         else:
-            move = chess.Move(self.selected_square, square)
-            piece = self.board.piece_at(self.selected_square)
-            if piece.piece_type == chess.PAWN and chess.square_rank(square) in [0,7]:
-                self.show_promotion_popup(move)
-            else:
-                self.make_move(move)
+            # Try every legal move from selected_square to target square
+            move_made = False
+            for move in self.board.legal_moves:
+                if move.from_square == self.selected_square and move.to_square == square:
+                    self.board.push(move)
+                    self.update_board()
+                    if self.network:
+                        self.network.send_move(move)
+                        self.is_my_turn = False
+                    self.update_status(f"{'White' if self.board.turn else 'Black'} to move")
+                    if self.board.is_game_over():
+                        self.show_game_over()
+                    move_made = True
+                    break
+            if not move_made:
+                self.update_status("Illegal move!")
             self.selected_square = None
-
-    def make_move(self, move):
-        if move in self.board.legal_moves:
-            self.board.push(move)
-            self.update_board()
-            if self.network:
-                self.is_my_turn = False
-                self.network.send_message("MOVE", move.uci())
-            self.update_status(f"{'White' if self.board.turn else 'Black'} to move")
-            if self.board.is_game_over():
-                self.show_game_over()
-        else:
-            self.update_status('Illegal move!')
 
     def update_board(self):
         for square, btn in self.square_buttons.items():
             piece = self.board.piece_at(square)
             btn.text = piece.symbol() if piece else ''
-            btn.background_color = (1, 1, 1, 1)
+            btn.background_color = (1,1,1,1)
 
-    # ---------- PROMOTION ----------
-    def show_promotion_popup(self, move):
+    # ---------- GAME EVENTS ----------
+    def resign(self, instance):
+        winner = 'Black' if self.board.turn else 'White'
+        if self.network:
+            self.network.send_message("RESIGN")
+        self.show_popup(f'{winner} wins by resignation!', self.reset_game)
+
+    def offer_draw(self, instance):
+        if self.network:
+            self.network.send_message("DRAW")
+            self.show_popup("Draw offer sent to opponent.", None)
+        else:
+            self.show_popup("Local draw offered!", None)
+
+    def offer_draw_network(self):
         content = BoxLayout(orientation='vertical', spacing=10)
-        content.add_widget(Label(text='Choose promotion piece:'))
-        pieces = {'Queen': chess.QUEEN, 'Rook': chess.ROOK, 'Bishop': chess.BISHOP, 'Knight': chess.KNIGHT}
+        content.add_widget(Label(text='Opponent offered a draw. Accept?'))
+
         buttons = BoxLayout(spacing=10)
-        for name, piece_type in pieces.items():
-            btn = Button(text=name)
-            btn.bind(on_press=lambda x, pt=piece_type: self.complete_promotion(move, pt))
-            buttons.add_widget(btn)
+        accept_btn = Button(text='Accept', on_press=self.accept_draw_network)
+        decline_btn = Button(text='Decline', on_press=self.decline_draw_network)
+        buttons.add_widget(accept_btn)
+        buttons.add_widget(decline_btn)
         content.add_widget(buttons)
-        popup = Popup(title='Pawn Promotion', content=content, size_hint=(0.8,0.4))
-        self.promo_popup = popup
+
+        self.draw_popup = Popup(title='Draw Offer', content=content, size_hint=(0.8,0.4))
+        self.draw_popup.open()
+
+    def accept_draw_network(self, instance=None):
+        if self.draw_popup:
+            self.draw_popup.dismiss()
+        if self.network:
+            self.network.send_message("DRAW_ACCEPT")
+        self.show_popup("Draw accepted. Game ends.", self.reset_game)
+
+    def decline_draw_network(self, instance=None):
+        if self.draw_popup:
+            self.draw_popup.dismiss()
+        self.show_popup("Draw declined. The game continues.", None)
+
+    def reset_game(self, instance=None):
+        self.board.reset()
+        self.selected_square = None
+        self.draw_offers = 0
+        self.is_my_turn = True
+        self.update_board()
+        self.update_status("White to move")
+
+    def show_game_over(self):
+        result = self.board.result()
+        self.show_popup(f'Game over! Result: {result}', self.reset_game)
+
+    # ---------- STATUS/POPUPS ----------
+    def update_status(self, message):
+        self.status_label.text = message
+
+    def show_popup(self, message, on_dismiss_callback=None):
+        popup = Popup(title='Chess', content=Label(text=message), size_hint=(0.8,0.4))
+        if on_dismiss_callback:
+            popup.bind(on_dismiss=lambda x: on_dismiss_callback())
         popup.open()
 
-    def complete_promotion(self, move, piece_type):
-        self.promo_popup.dismiss()
-        move.promotion = piece_type
-        self.make_move(move)
-
-    # ---------- LOCAL ----------
-    def start_local_game(self, instance):
-        if self.broadcast_thread:
-            self.broadcast_stop_event.set()
-        self.network = None
-        self.is_my_turn = True
-        self.update_status("Local game started! White to move")
-        self.reset_game()
-
-    # ---------- LAN ----------
-    def host_game(self, instance):
+    # ---------- HOST/JOIN/LOCAL ----------
+    def host_game(self, instance=None):
         self.broadcast_stop_event.clear()
         self.broadcast_thread = threading.Thread(target=broadcast_host, args=(self.broadcast_stop_event,), daemon=True)
         self.broadcast_thread.start()
+
         self.network = NetworkThread(self, is_server=True)
         self.network.start()
         self.is_my_turn = True
+        self.update_status("Hosting game... Your turn.")
 
-    def join_game(self, instance):
+    def join_game(self, instance=None):
         hosts = discover_hosts()
         if not hosts:
-            self.show_popup("No hosts found on this Wi-Fi!", None)
+            self.show_popup("No hosts found on Wi-Fi!", None)
             return
-        self.show_host_selection_popup(hosts)
-
-    def show_host_selection_popup(self, hosts):
         content = BoxLayout(orientation='vertical', spacing=10)
         for ip in hosts:
             btn = Button(text=ip, size_hint_y=None, height=40)
             btn.bind(on_press=lambda x, ip=ip: self.connect_to_host(ip))
             content.add_widget(btn)
-        popup = Popup(title='Select Host', content=content, size_hint=(0.8, 0.6))
-        self.host_popup = popup
+        popup = Popup(title='Select Host', content=content, size_hint=(0.8,0.6))
         popup.open()
+        self.host_popup = popup
 
     def connect_to_host(self, host_ip):
         if hasattr(self, 'host_popup'):
@@ -243,71 +275,14 @@ class ChessApp(App):
         self.network = NetworkThread(self, is_server=False, host=host_ip)
         self.network.start()
         self.is_my_turn = False
+        self.update_status("Connected! Waiting for opponent's move.")
 
-    # ---------- GAME EVENTS ----------
-    def resign(self, instance):
-        if self.network:
-            self.network.send_message("RESIGN")
-        winner = 'Black' if self.board.turn else 'White'
-        self.show_popup(f'{winner} wins by resignation! Game will reset.', self.reset_game)
-
-    def offer_draw(self, instance):
-        if self.network:
-            self.network.send_message("DRAW")
-            self.show_popup("Draw offer sent!", None)
-        else:
-            self.show_popup("Local draw offer!", None)
-
-    def show_draw_offer_from_network(self):
-        content = BoxLayout(orientation='vertical', spacing=10)
-        content.add_widget(Label(text='Opponent offered a draw. Accept?'))
-
-        buttons = BoxLayout(spacing=10)
-        accept_btn = Button(text='Accept')
-        decline_btn = Button(text='Decline')
-
-        accept_btn.bind(on_press=lambda x: self.accept_draw_network())
-        decline_btn.bind(on_press=lambda x: self.decline_draw_network())
-
-        buttons.add_widget(accept_btn)
-        buttons.add_widget(decline_btn)
-        content.add_widget(buttons)
-
-        popup = Popup(title='Draw Offer', content=content, size_hint=(0.8, 0.4))
-        self.draw_popup = popup
-        popup.open()
-
-    def accept_draw_network(self):
-        if self.draw_popup:
-            self.draw_popup.dismiss()
-        if self.network:
-            self.network.send_message("DRAW_ACCEPT")
-        self.show_popup("Draw accepted. Game ends.", self.reset_game)
-
-    def decline_draw_network(self):
-        if self.draw_popup:
-            self.draw_popup.dismiss()
-        self.show_popup("Draw declined. The game continues.", None)
-
-    def reset_game(self):
-        self.board.reset()
-        self.selected_square = None
-        self.draw_offers = 0
-        self.update_board()
+    def start_local(self, instance=None):
+        self.network = None
         self.is_my_turn = True
+        self.update_status("Local game started! White to move.")
+        self.reset_game()
 
-    def show_game_over(self):
-        result = self.board.result()
-        self.show_popup(f'Game over! Result: {result}', self.reset_game)
-
-    def update_status(self, message):
-        self.status_label.text = message
-
-    def show_popup(self, message, on_dismiss_callback=None):
-        popup = Popup(title='Chess', content=Label(text=message), size_hint=(0.8, 0.4))
-        if on_dismiss_callback:
-            popup.bind(on_dismiss=lambda x: on_dismiss_callback())
-        popup.open()
 
 if __name__ == '__main__':
     ChessApp().run()
