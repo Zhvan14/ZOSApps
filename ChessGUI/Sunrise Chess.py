@@ -161,10 +161,19 @@ class ChessApp(App):
         else:
             return (0.2, 0.2, 0.2, 1)  # Black
 
+    def reset_colors(self):
+        for square, btn in self.square_buttons.items():
+            rank = chess.square_rank(square)
+            file = chess.square_file(square)
+            btn.background_color = self.get_square_color(rank, file)
+
     def select_square(self, square):
         if self.network and not self.is_my_turn:
             self.update_status("Wait for your turn!")
             return
+
+        # Reset colors before making a new selection
+        self.reset_colors()
 
         if self.selected_square is None:
             piece = self.board.piece_at(square)
@@ -173,6 +182,11 @@ class ChessApp(App):
                 return
             self.selected_square = square
             self.square_buttons[square].background_color = (0, 1, 0, 1)
+
+            # Highlight legal moves
+            for move in self.board.legal_moves:
+                if move.from_square == square:
+                    self.square_buttons[move.to_square].background_color = (0, 0, 1, 1) # Blue for legal moves
         else:
             move_made = False
             for move in self.board.legal_moves:
@@ -189,8 +203,11 @@ class ChessApp(App):
                     break
             if not move_made:
                 self.update_status("Illegal move!")
+
             self.selected_square = None
             self.update_board()
+            self.reset_colors()
+
 
     def update_board(self):
         for square, btn in self.square_buttons.items():
@@ -202,7 +219,7 @@ class ChessApp(App):
             if piece:
                 if self.online:
                     piece_name = piece.symbol().lower()
-                    color = 'w' if piece.color else 'b'
+                    color = 'w' if piece.color == chess.WHITE else 'b'
                     url = f"https://images.chesscomfiles.com/chess-themes/pieces/neo/300/{color}{piece_name}.png"
                     img = AsyncImage(source=url, size_hint=(None, None), size=(50, 50))
                     btn.add_widget(img)
@@ -314,3 +331,4 @@ class ChessApp(App):
 
 if __name__ == "__main__":
     ChessApp().run()
+ 
